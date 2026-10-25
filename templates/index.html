@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="ReviewScope — Analisis sentimen ulasan pelanggan menggunakan Logistic Regression dan TF-IDF. Proyek TA-03 Pembelajaran Mesin." />
+  <title>ReviewScope — Customer Sentiment Analysis</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+
+  <!-- ================================================================
+       HEADER
+  ================================================================ -->
+  <header class="site-header" role="banner">
+    <div class="container header-inner">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">
+          <!-- Simple bar-chart icon via inline SVG -->
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+            <rect x="1" y="11" width="4" height="10" rx="1" fill="currentColor" opacity=".55"/>
+            <rect x="7" y="6" width="4" height="15" rx="1" fill="currentColor" opacity=".75"/>
+            <rect x="13" y="2" width="4" height="19" rx="1" fill="currentColor"/>
+            <rect x="19" y="8" width="2" height="13" rx="1" fill="currentColor" opacity=".45"/>
+          </svg>
+        </span>
+        <div>
+          <span class="brand-name">ReviewScope</span>
+          <span class="brand-sub">Customer Sentiment Analysis</span>
+        </div>
+      </div>
+
+      <nav class="site-nav" aria-label="Navigasi utama">
+        <a href="#analysis" class="nav-link">Analisis</a>
+        <a href="#model-info" class="nav-link">Model</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ================================================================
+       MAIN CONTENT
+  ================================================================ -->
+  <main class="site-main">
+    <div class="container main-grid">
+
+      <!-- ============================================================
+           LEFT COLUMN: FORM + RESULTS
+      ============================================================ -->
+      <section class="col-primary" aria-label="Area analisis sentimen">
+
+        <!-- Model error banner (only when .joblib files missing) -->
+        {% if model_error %}
+        <div class="alert alert--warning" role="alert" id="model-error-banner">
+          <span class="alert__icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M8 5v3.5M8 11h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <div class="alert__body">
+            <strong>Model Belum Tersedia</strong>
+            <p>Salin kedua file berikut dari Google Colab ke folder project, lalu restart Flask:</p>
+            <ul class="file-list">
+              <li><code>logistic_regression_model.joblib</code></li>
+              <li><code>tfidf_vectorizer.joblib</code></li>
+            </ul>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- ANALYSIS FORM -->
+        <div class="section-header" id="analysis">
+          <h1 class="section-title">Analisis Sentimen Ulasan</h1>
+          <p class="section-desc">
+            Masukkan ulasan pelanggan dalam bahasa Inggris. Sistem akan mengklasifikasikan
+            sentimen menggunakan model yang sudah dilatih.
+          </p>
+        </div>
+
+        <form
+          id="sentiment-form"
+          class="analysis-form"
+          method="POST"
+          action="/analyze"
+          novalidate
+          aria-label="Form analisis sentimen"
+        >
+          <div class="form-field">
+            <label class="form-label" for="review-input">
+              Teks Ulasan Pelanggan
+            </label>
+            <textarea
+              id="review-input"
+              name="review"
+              class="form-textarea{% if error_message %} form-textarea--error{% endif %}"
+              rows="6"
+              maxlength="2000"
+              placeholder="Contoh: The product quality exceeded my expectations. Very happy with this purchase."
+              aria-required="true"
+              aria-describedby="char-count{% if error_message %} input-error{% endif %}"
+            >{{ review_text | e }}</textarea>
+            <div class="form-meta">
+              {% if error_message %}
+              <span class="form-error" id="input-error" role="alert">{{ error_message }}</span>
+              {% else %}
+              <span class="form-hint" id="form-hint">Model dilatih dengan ulasan berbahasa Inggris.</span>
+              {% endif %}
+              <span class="char-count" id="char-count" aria-live="polite">
+                <span id="char-current">{{ review_text | length }}</span>/2000
+              </span>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button
+              type="submit"
+              id="submit-btn"
+              class="btn btn--primary"
+              {% if not model_ready %}disabled aria-disabled="true"{% endif %}
+            >
+              <span class="btn__icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M2 8h10M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span class="btn__label">Analisis Sentimen</span>
+              <span class="btn__loading" aria-hidden="true">Memproses…</span>
+            </button>
+            <button
+              type="button"
+              id="clear-btn"
+              class="btn btn--secondary"
+              aria-label="Bersihkan teks dan hasil"
+            >
+              Bersihkan
+            </button>
+          </div>
+        </form>
+
+        <!-- ============================================================
+             RESULT PANEL
+        ============================================================ -->
+        {% if result %}
+        <div
+          class="result-panel result-panel--{{ result.sentiment_class }}"
+          id="result-panel"
+          aria-live="polite"
+          aria-label="Hasil analisis sentimen"
+        >
+          <!-- Result header -->
+          <div class="result-header">
+            <div class="result-badge result-badge--{{ result.sentiment_class }}" aria-label="Sentimen terdeteksi">
+              <span class="result-badge__icon" aria-hidden="true">
+                {% if result.sentiment_class == 'positive' %}
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                  <path d="M4 9l3.5 3.5L14 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                {% else %}
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                  <path d="M5.5 5.5l7 7M12.5 5.5l-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                {% endif %}
+              </span>
+              <span class="result-badge__label">{{ result.sentiment_label | upper }}</span>
+            </div>
+            <p class="result-interpretation">
+              {% if result.sentiment_class == 'positive' %}
+              Model mengklasifikasikan ulasan ini sebagai sentimen positif.
+              {% else %}
+              Model mengklasifikasikan ulasan ini sebagai sentimen negatif.
+              {% endif %}
+            </p>
+          </div>
+
+          <!-- Probability bars -->
+          <div class="prob-section">
+            <h2 class="prob-section__title">Distribusi Probabilitas</h2>
+            <p class="prob-section__note">
+              Keluaran model — bukan jaminan kebenaran prediksi.
+            </p>
+
+            <div class="prob-bars">
+              <!-- Positif -->
+              <div class="prob-bar-row">
+                <div class="prob-bar-label">
+                  <span class="prob-dot prob-dot--positive" aria-hidden="true"></span>
+                  <span>Positif</span>
+                </div>
+                <div class="prob-bar-track" role="progressbar"
+                  aria-valuenow="{{ result.prob_positive }}"
+                  aria-valuemin="0" aria-valuemax="100"
+                  aria-label="Probabilitas Positif {{ result.prob_positive }}%">
+                  <div
+                    class="prob-bar-fill prob-bar-fill--positive"
+                    style="width: {{ result.prob_positive }}%"
+                  ></div>
+                </div>
+                <span class="prob-value">{{ result.prob_positive }}%</span>
+              </div>
+
+              <!-- Negatif -->
+              <div class="prob-bar-row">
+                <div class="prob-bar-label">
+                  <span class="prob-dot prob-dot--negative" aria-hidden="true"></span>
+                  <span>Negatif</span>
+                </div>
+                <div class="prob-bar-track" role="progressbar"
+                  aria-valuenow="{{ result.prob_negative }}"
+                  aria-valuemin="0" aria-valuemax="100"
+                  aria-label="Probabilitas Negatif {{ result.prob_negative }}%">
+                  <div
+                    class="prob-bar-fill prob-bar-fill--negative"
+                    style="width: {{ result.prob_negative }}%"
+                  ></div>
+                </div>
+                <span class="prob-value">{{ result.prob_negative }}%</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Reviewed text -->
+          <div class="reviewed-text">
+            <span class="reviewed-text__label">Ulasan yang Dianalisis</span>
+            <blockquote class="reviewed-text__content">{{ result.review_text | e }}</blockquote>
+          </div>
+        </div>
+
+        {% else %}
+        <!-- Empty state -->
+        <div class="empty-state" id="empty-state" aria-label="Belum ada hasil">
+          <div class="empty-state__icon" aria-hidden="true">
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+              <rect x="5" y="8" width="22" height="17" rx="2" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M10 14h12M10 18h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M16 4v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <p class="empty-state__text">
+            Hasil analisis akan muncul di sini setelah Anda mengirimkan ulasan.
+          </p>
+        </div>
+        {% endif %}
+
+      </section>
+
+      <!-- ============================================================
+           RIGHT COLUMN: MODEL INFO + USAGE NOTES
+      ============================================================ -->
+      <aside class="col-sidebar" aria-label="Informasi model">
+
+        <!-- Model Info -->
+        <div class="info-card" id="model-info">
+          <h2 class="info-card__title">Informasi Model</h2>
+          <p class="info-card__desc">
+            Ringkasan metode dan hasil evaluasi pada dataset uji proyek.
+          </p>
+
+          <dl class="info-list">
+            <div class="info-list__row">
+              <dt class="info-list__term">Algoritma</dt>
+              <dd class="info-list__def">Logistic Regression</dd>
+            </div>
+            <div class="info-list__row">
+              <dt class="info-list__term">Representasi Teks</dt>
+              <dd class="info-list__def">TF-IDF</dd>
+            </div>
+            <div class="info-list__row">
+              <dt class="info-list__term">Dataset</dt>
+              <dd class="info-list__def">3.000 ulasan (Amazon, IMDb, Yelp)</dd>
+            </div>
+            <div class="info-list__row">
+              <dt class="info-list__term">Data Latih / Uji</dt>
+              <dd class="info-list__def">2.400 / 600</dd>
+            </div>
+          </dl>
+
+          <div class="metric-grid">
+            <div class="metric-item">
+              <span class="metric-value">82,83%</span>
+              <span class="metric-label">Accuracy</span>
+            </div>
+            <div class="metric-item">
+              <span class="metric-value">83,20%</span>
+              <span class="metric-label">F1-Score</span>
+            </div>
+            <div class="metric-item metric-item--wide">
+              <span class="metric-value">0,9014</span>
+              <span class="metric-label">ROC-AUC</span>
+            </div>
+          </div>
+
+          <p class="info-note">
+            Angka di atas berasal dari evaluasi dataset uji eksperimen proyek.
+            Kinerja aktual dapat berbeda untuk ulasan di luar karakteristik dataset.
+          </p>
+        </div>
+
+        <!-- Usage Notes -->
+        <div class="info-card info-card--subtle">
+          <h2 class="info-card__title">Catatan Penggunaan</h2>
+          <ul class="usage-list">
+            <li>Model dilatih menggunakan ulasan <strong>berbahasa Inggris</strong>. Hasil untuk bahasa lain tidak dapat dijamin.</li>
+            <li>Sarkasme, ironi, atau konteks khusus mungkin tidak terklasifikasi dengan tepat.</li>
+            <li>Probabilitas adalah keluaran model, bukan jaminan kebenaran prediksi.</li>
+            <li>Batas panjang ulasan: <strong>2.000 karakter</strong>.</li>
+          </ul>
+        </div>
+
+      </aside>
+    </div>
+  </main>
+
+  <!-- ================================================================
+       FOOTER
+  ================================================================ -->
+  <footer class="site-footer" role="contentinfo">
+    <div class="container footer-inner">
+      <span class="footer-text">
+        Proyek TA-03 &mdash; Pembelajaran Mesin &mdash; Informatika
+      </span>
+      <span class="footer-divider" aria-hidden="true">·</span>
+      <span class="footer-text">
+        Logistic Regression · TF-IDF · scikit-learn
+      </span>
+    </div>
+  </footer>
+
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
